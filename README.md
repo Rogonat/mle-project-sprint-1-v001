@@ -42,7 +42,6 @@ part2_dvc/
     scripts/fit_model.py            стадия fit_model
     dvc.yaml, params.yaml, dvc.lock конфигурация DVC-пайплайна
     cv_results/metrics.json         метрики модели
-    s3_buildings-flats.tar.gz       копия S3-бакета
 vm-emulation/                       docker-compose, заменяющий ВМ курса
 ```
 
@@ -107,7 +106,7 @@ DAG: `part1_airlfow/dags/clean_dataset_dag.py`, функция `clean_dataset_da
 
 #### Хранилище S3
 
-Модель и выборку отправляем в бакет buildings-flats командой dvc push. S3 здесь локальный (LocalStack), поэтому вы не сможете в него попасть и посмотреть обученную модель. Копию бакета кладём в репозиторий: part2_dvc/s3_buildings-flats.tar.gz. Внутри лежат модель и выборка, их md5 совпадают с dvc.lock.
+Модель и выборку отправляем в бакет buildings-flats командой dvc push. S3 здесь локальный (LocalStack), поэтому вы не сможете в него попасть и посмотреть обученную модель. Копию бакета кладём в репозиторий: https://github.com/Rogonat/mle-project-sprint-1-v001/blob/w-archive/part2_dvc/s3_buildings-flats.tar.gz. Внутри лежат модель и выборка, их md5 совпадают с dvc.lock.
 
 #### Окружение (замена ВМ)
 
