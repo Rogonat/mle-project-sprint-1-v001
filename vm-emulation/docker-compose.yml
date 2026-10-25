@@ -1,0 +1,179 @@
+# Local replacement for the course VM: Airflow, project Postgres with
+# buildings/flats, LocalStack S3 and a python container for Jupyter/DVC.
+# Project code is mounted from the repo root.
+
+name: pipeline-vm-emulation
+
+x-airflow-common:
+  &airflow-common
+  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.7.3}
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # connection "project_db" for the DAGs
+    AIRFLOW_CONN_PROJECT_DB: postgres://mle_user:mle_password@project-db:5432/buildings_flats
+  volumes:
+    - ${PROJECT_DIR:-..}/part1_airlfow/dags:/opt/airflow/dags
+    - ${PROJECT_DIR:-..}/part1_airlfow/plugins:/opt/airflow/plugins
+    - ${PROJECT_DIR:-..}/part1_airlfow/logs:/opt/airflow/logs
+    - ${PROJECT_DIR:-..}/part1_airlfow/data/tmp:/opt/airflow/data/tmp
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+    project-db:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:13
+    container_name: pipeline_airflow_meta_db
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: pipeline_airflow_webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: pipeline_airflow_scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: pipeline_airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /sources/part1_airlfow/{logs,dags,plugins,data/tmp}
+        chown -R "${AIRFLOW_UID:-50000}:0" /sources/part1_airlfow/{logs,dags,plugins,data}
+        exec /entrypoint airflow version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    user: "0:0"
+    volumes:
+      - ${PROJECT_DIR:-..}:/sources
+
+  project-db:
+    image: postgres:15
+    container_name: pipeline_project_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mle_user
+      POSTGRES_PASSWORD: mle_password
+      POSTGRES_DB: buildings_flats
+    ports:
+      - "5432:5432"
+    volumes:
+      - project-db-data:/var/lib/postgresql/data
+      - ./buildings.sql:/docker-entrypoint-initdb.d/01-buildings.sql:ro
+      - ./flats.sql:/docker-entrypoint-initdb.d/02-flats.sql:ro
+      - ./init/03-load-data.sh:/docker-entrypoint-initdb.d/03-load-data.sh:ro
+      - ./sp_1_project_buildings_202402291420.csv:/data/sp_1_project_buildings_202402291420.csv:ro
+      - ./sp_1_project_flats_202402291420.csv:/data/sp_1_project_flats_202402291420.csv:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mle_user -d buildings_flats"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  s3:
+    image: localstack/localstack:3.0.2
+    container_name: pipeline_s3
+    restart: unless-stopped
+    environment:
+      SERVICES: s3
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "4566:4566"
+    volumes:
+      - s3-data:/var/lib/localstack
+      - ./init/init-s3.sh:/etc/localstack/init/ready.d/init-s3.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ml:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pipeline_ml
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ${PROJECT_DIR:-..}:/app
+    ports:
+      - "8888:8888"
+    environment:
+      POSTGRES_HOST: project-db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: mle_user
+      POSTGRES_PASSWORD: mle_password
+      POSTGRES_DB: buildings_flats
+      AWS_ENDPOINT_URL: http://s3:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_BUCKET_NAME: buildings-flats
+    depends_on:
+      project-db:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+
+volumes:
+  airflow-postgres-db-volume:
+  project-db-data:
+  s3-data:

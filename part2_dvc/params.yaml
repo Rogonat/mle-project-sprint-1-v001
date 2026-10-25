@@ -1,0 +1,14 @@
+data:
+  table_name: flats_buildings_clean
+  output_path: data/initial_data.csv
+
+split:
+  test_size: 0.2
+  random_state: 42
+
+target_col: price
+
+model:
+  n_estimators: 100
+  max_depth: 12
+  random_state: 42

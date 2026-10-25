@@ -1,0 +1,49 @@
+schema: '2.0'
+stages:
+  get_data:
+    cmd: python scripts/get_data.py
+    deps:
+    - path: scripts/get_data.py
+      hash: md5
+      md5: 6dd1fa36e2e2ab7f743682643f416ea8
+      size: 944
+    params:
+      params.yaml:
+        data:
+          table_name: flats_buildings_clean
+          output_path: data/initial_data.csv
+    outs:
+    - path: data/initial_data.csv
+      hash: md5
+      md5: a05c58659da1c1669de174bdb456e8c7
+      size: 16933514
+  fit_model:
+    cmd: python scripts/fit_model.py
+    deps:
+    - path: data/initial_data.csv
+      hash: md5
+      md5: a05c58659da1c1669de174bdb456e8c7
+      size: 16933514
+    - path: scripts/fit_model.py
+      hash: md5
+      md5: 769380ea6c0b631a840ec0dce60f46d1
+      size: 2406
+    params:
+      params.yaml:
+        model:
+          n_estimators: 100
+          max_depth: 12
+          random_state: 42
+        split:
+          test_size: 0.2
+          random_state: 42
+        target_col: price
+    outs:
+    - path: cv_results/metrics.json
+      hash: md5
+      md5: 06bd07a0071b8ceb661d9cec432e755b
+      size: 88
+    - path: models/model.pkl
+      hash: md5
+      md5: 5efd418f05cabe3afb1a986da355305f
+      size: 36294855

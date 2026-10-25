@@ -1,0 +1,24 @@
+stages:
+  get_data:
+    cmd: python scripts/get_data.py
+    deps:
+      - scripts/get_data.py
+    params:
+      - data
+    outs:
+      - data/initial_data.csv
+
+  fit_model:
+    cmd: python scripts/fit_model.py
+    deps:
+      - scripts/fit_model.py
+      - data/initial_data.csv
+    params:
+      - split
+      - model
+      - target_col
+    outs:
+      - models/model.pkl
+    metrics:
+      - cv_results/metrics.json:
+          cache: false
